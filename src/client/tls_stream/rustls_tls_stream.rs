@@ -126,7 +126,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> TlsStream<S> {
                                 return Err(crate::Error::Io {
                                     kind: IoErrorKind::InvalidInput,
                                     message: format!(
-                                        "Certificate file {} contain 0 or more than 1 certs",
+                                        "Certificate file {} must contain exactly one certificate",
                                         path.to_string_lossy()
                                     ),
                                 });

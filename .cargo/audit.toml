@@ -1,6 +1,6 @@
 # Cargo audit configuration
 #
-# IMPORTANT: The three CVEs below (RUSTSEC-2026-0098, 0099, 0104) are
+# IMPORTANT: The three RUSTSEC advisories below (RUSTSEC-2026-0098, 0099, 0104) are
 # DEVELOPMENT DEPENDENCY ONLY and do NOT affect production users.
 #
 # Root cause: azure_identity (dev-dep only) -> reqwest 0.11 -> rustls 0.21 ->
