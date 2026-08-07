@@ -333,4 +333,31 @@ mod tests {
 
         Ok(())
     }
+
+    /// JDBC spells the key `multiSubnetFailover`; it reaches the same lookup as
+    /// the ADO.NET `MultiSubnetFailover`.
+    #[test]
+    fn multi_subnet_failover_parsing() -> crate::Result<()> {
+        let test_str = "jdbc:sqlserver://my-server.com:4200;multiSubnetFailover=true";
+        let jdbc: JdbcConfig = test_str.parse()?;
+
+        assert!(jdbc.multi_subnet_failover()?);
+
+        let test_str = "jdbc:sqlserver://my-server.com:4200;multiSubnetFailover=false";
+        let jdbc: JdbcConfig = test_str.parse()?;
+
+        assert!(!jdbc.multi_subnet_failover()?);
+
+        Ok(())
+    }
+
+    #[test]
+    fn multi_subnet_failover_parsing_missing() -> crate::Result<()> {
+        let test_str = "jdbc:sqlserver://my-server.com:4200";
+        let jdbc: JdbcConfig = test_str.parse()?;
+
+        assert!(!jdbc.multi_subnet_failover()?);
+
+        Ok(())
+    }
 }

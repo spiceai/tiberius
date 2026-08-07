@@ -484,4 +484,53 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn multi_subnet_failover_parsing() -> crate::Result<()> {
+        for (test_str, expected) in [
+            ("MultiSubnetFailover=Yes", true),
+            ("MultiSubnetFailover=true", true),
+            ("MultiSubnetFailover=No", false),
+            ("MultiSubnetFailover=false", false),
+        ] {
+            let ado: AdoNetConfig = test_str.parse()?;
+            assert_eq!(expected, ado.multi_subnet_failover()?, "{test_str}");
+        }
+
+        Ok(())
+    }
+
+    /// The key is matched case-insensitively, like every other key the parser
+    /// handles.
+    #[test]
+    fn multi_subnet_failover_parsing_is_case_insensitive() -> crate::Result<()> {
+        for test_str in ["multisubnetfailover=yes", "MULTISUBNETFAILOVER=yes"] {
+            let ado: AdoNetConfig = test_str.parse()?;
+            assert!(ado.multi_subnet_failover()?, "{test_str}");
+        }
+
+        Ok(())
+    }
+
+    /// An absent key leaves the sequential connect behaviour untouched.
+    #[test]
+    fn multi_subnet_failover_parsing_missing() -> crate::Result<()> {
+        let test_str = "server=tcp:my-server.com,4200";
+        let ado: AdoNetConfig = test_str.parse()?;
+
+        assert!(!ado.multi_subnet_failover()?);
+
+        Ok(())
+    }
+
+    /// A value that is not a boolean is a configuration error rather than a
+    /// silent `false` -- the caller asked for something the driver could not
+    /// honour.
+    #[test]
+    fn multi_subnet_failover_parsing_rejects_a_non_boolean() {
+        let test_str = "MultiSubnetFailover=sometimes";
+        let ado: AdoNetConfig = test_str.parse().expect("parses as a connection string");
+
+        assert!(ado.multi_subnet_failover().is_err());
+    }
 }
