@@ -32,6 +32,7 @@ pub struct Config {
     pub(crate) trust: TrustConfig,
     pub(crate) auth: AuthMethod,
     pub(crate) readonly: bool,
+    pub(crate) multi_subnet_failover: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -65,6 +66,7 @@ impl Default for Config {
             trust: TrustConfig::Default,
             auth: AuthMethod::None,
             readonly: false,
+            multi_subnet_failover: false,
         }
     }
 }
@@ -171,6 +173,34 @@ impl Config {
         self.readonly = readnoly;
     }
 
+    /// Sets whether the client should try every address the server name
+    /// resolves to concurrently, rather than one at a time.
+    ///
+    /// An Always-On availability group listener commonly resolves to one
+    /// address per subnet, of which only the one in front of the primary
+    /// replica accepts connections. Attempting them sequentially stalls on each
+    /// unreachable address until the OS gives up, so a caller with its own
+    /// connect deadline can time out before the live replica is ever tried.
+    ///
+    /// This only records the intent -- opening the connection is the caller's
+    /// job, and [`Config::get_multi_subnet_failover`] is how it reads the
+    /// setting back.
+    ///
+    /// - Defaults to `false`.
+    ///
+    /// [`Config::get_multi_subnet_failover`]: #method.get_multi_subnet_failover
+    pub fn multi_subnet_failover(&mut self, multi_subnet_failover: bool) {
+        self.multi_subnet_failover = multi_subnet_failover;
+    }
+
+    /// Whether `MultiSubnetFailover` was requested, either through the
+    /// connection string or [`Config::multi_subnet_failover`].
+    ///
+    /// [`Config::multi_subnet_failover`]: #method.multi_subnet_failover
+    pub fn get_multi_subnet_failover(&self) -> bool {
+        self.multi_subnet_failover
+    }
+
     pub(crate) fn get_host(&self) -> &str {
         self.host
             .as_deref()
@@ -212,7 +242,9 @@ impl Config {
     /// |`TrustServerCertificateCA`|`<path>`|Path to a `pem`, `crt` or `der` certificate file. Cannot be used together with `TrustServerCertificate`|
     /// |`encrypt`|`true`,`false`,`yes`,`no`,`DANGER_PLAINTEXT`|Specifies whether the driver uses TLS to encrypt communication.|
     /// |`Application Name`, `ApplicationName`|`<string>`|Sets the application name for the connection.|
+    /// |`MultiSubnetFailover`|`true`,`false`,`yes`,`no`|Records that the client should try every address the server name resolves to concurrently, for an Always-On listener spanning subnets. Read back with [`get_multi_subnet_failover`]; establishing the connection is the caller's job.|
     ///
+    /// [`get_multi_subnet_failover`]: struct.Config.html#method.get_multi_subnet_failover
     /// [ADO.NET connection string]: https://docs.microsoft.com/en-us/dotnet/framework/data/adonet/connection-strings
     pub fn from_ado_string(s: &str) -> crate::Result<Self> {
         let ado: AdoNetConfig = s.parse()?;
@@ -268,6 +300,8 @@ impl Config {
         builder.encryption(s.encrypt()?);
 
         builder.readonly(s.readonly());
+
+        builder.multi_subnet_failover(s.multi_subnet_failover()?);
 
         Ok(builder)
     }
@@ -387,5 +421,80 @@ pub(crate) trait ConfigString {
             .get("applicationintent")
             .filter(|val| *val == "ReadOnly")
             .is_some()
+    }
+
+    /// `MultiSubnetFailover` in an ADO.NET string, `multiSubnetFailover` in a
+    /// JDBC one -- both parsers lower-case their keys, so one lookup serves
+    /// both.
+    fn multi_subnet_failover(&self) -> crate::Result<bool> {
+        self.dict()
+            .get("multisubnetfailover")
+            .map(Self::parse_bool)
+            .unwrap_or(Ok(false))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+
+    /// The whole point of the setting: it has to survive the public
+    /// connection-string entry point, which is the only way a caller that did
+    /// not build the `Config` by hand can see it.
+    #[test]
+    fn multi_subnet_failover_survives_from_ado_string() -> crate::Result<()> {
+        let config = Config::from_ado_string(
+            "server=tcp:my-listener.com,1433;MultiSubnetFailover=Yes;TrustServerCertificate=true",
+        )?;
+
+        assert!(config.get_multi_subnet_failover());
+
+        Ok(())
+    }
+
+    #[test]
+    fn multi_subnet_failover_survives_from_jdbc_string() -> crate::Result<()> {
+        let config = Config::from_jdbc_string(
+            "jdbc:sqlserver://my-listener.com:1433;multiSubnetFailover=true",
+        )?;
+
+        assert!(config.get_multi_subnet_failover());
+
+        Ok(())
+    }
+
+    /// The regression guard: before this setting existed the key was parsed
+    /// into the dictionary and dropped, so a caller reading the `Config` saw
+    /// the same value whether or not it was asked for.
+    #[test]
+    fn multi_subnet_failover_defaults_off_and_is_not_implied() -> crate::Result<()> {
+        let config = Config::from_ado_string("server=tcp:my-server.com,1433")?;
+        assert!(!config.get_multi_subnet_failover());
+
+        let config =
+            Config::from_ado_string("server=tcp:my-server.com,1433;MultiSubnetFailover=No")?;
+        assert!(!config.get_multi_subnet_failover());
+
+        assert!(!Config::new().get_multi_subnet_failover());
+
+        Ok(())
+    }
+
+    #[test]
+    fn multi_subnet_failover_can_be_set_directly() {
+        let mut config = Config::new();
+        config.multi_subnet_failover(true);
+
+        assert!(config.get_multi_subnet_failover());
+    }
+
+    /// A non-boolean value fails the whole connection string rather than
+    /// silently connecting sequentially.
+    #[test]
+    fn multi_subnet_failover_rejects_a_non_boolean() {
+        assert!(Config::from_ado_string(
+            "server=tcp:my-server.com,1433;MultiSubnetFailover=sometimes"
+        )
+        .is_err());
     }
 }
